@@ -63,6 +63,9 @@ class AdminPlugin(Star):
         self.plugin_data_dir = str(StarTools.get_data_dir("astrbot_plugin_QQAdmin"))
         group_join_data = os.path.join(self.plugin_data_dir, "group_join_data.json")
         self.group_join_manager = GroupJoinManager(group_join_data)
+        self.group_join_manager.auto_reject_without_keyword = bool(
+            self.conf.get("reject_without_keyword", False)
+        )
 
         # 概率打印LOGO（qwq）
         if random.random() < 0.01:
@@ -579,6 +582,40 @@ class AdminPlugin(Star):
             return
         yield event.plain_result(f"本群的进群关键词：{keywords}")
 
+    @filter.command("添加进群黑词")
+    @perm_required(PermLevel.ADMIN)
+    async def add_reject_keywords(self, event: AiocqhttpMessageEvent):
+        """添加进群黑名单关键词（命中即拒绝）"""
+        if keywords := event.message_str.removeprefix("添加进群黑词").strip().split():
+            self.group_join_manager.add_reject_keyword(
+                event.get_group_id(), keywords
+            )
+            yield event.plain_result(f"新增进群黑名单关键词：{keywords}")
+        else:
+            yield event.plain_result("未输入任何关键词")
+
+    @filter.command("删除进群黑词")
+    @perm_required(PermLevel.ADMIN)
+    async def remove_reject_keywords(self, event: AiocqhttpMessageEvent):
+        """删除进群黑名单关键词"""
+        if keywords := event.message_str.removeprefix("删除进群黑词").strip().split():
+            self.group_join_manager.remove_reject_keyword(
+                event.get_group_id(), keywords
+            )
+            yield event.plain_result(f"已删进群黑名单关键词：{keywords}")
+        else:
+            yield event.plain_result("未指定要删除的关键词")
+
+    @filter.command("进群黑词", alias={"查看进群黑词"})
+    @perm_required(PermLevel.ADMIN)
+    async def view_reject_keywords(self, event: AiocqhttpMessageEvent):
+        """查看进群黑名单关键词"""
+        keywords = self.group_join_manager.get_reject_keywords(event.get_group_id())
+        if not keywords:
+            yield event.plain_result("本群没有设置进群黑名单关键词")
+            return
+        yield event.plain_result(f"本群的进群黑名单关键词：{keywords}")
+
     @filter.command("添加进群黑名单")
     async def add_reject_ids(self, event: AiocqhttpMessageEvent):
         """添加指定ID到进群黑名单"""
@@ -659,11 +696,14 @@ class AdminPlugin(Star):
             else:
                 yield event.plain_result(reply)
 
-            if self.group_join_manager.should_reject(str(group_id), str(user_id)):
+            reason = self.group_join_manager.reject_reason(
+                str(group_id), str(user_id), comment
+            )
+            if reason:
                 await client.set_group_add_request(
-                    flag=flag, sub_type="add", approve=False, reason="黑名单用户"
+                    flag=flag, sub_type="add", approve=False, reason=reason,
                 )
-                yield event.plain_result("黑名单用户，已自动拒绝进群")
+                yield event.plain_result(f"{reason}，已自动拒绝进群")
             elif comment and self.group_join_manager.should_approve(
                 str(group_id), comment
             ):
